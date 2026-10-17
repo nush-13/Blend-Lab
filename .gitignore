@@ -1,0 +1,16 @@
+node_modules/
+build/
+dist/
+coverage/
+.blendlab-data/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+graphify-out/
+graphify-context-verified.png
+
+ollama-connected.png
+bun.lock
+
