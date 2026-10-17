@@ -1,0 +1,6 @@
+{
+  "name": "BLEND-LAB",
+  "description": "BLEND-LAB: Interactive AI model-blending laboratory and regression analyzer featuring BlendPilot.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
