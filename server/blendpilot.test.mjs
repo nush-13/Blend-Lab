@@ -139,3 +139,44 @@ test('correctness-first ties use stable model IDs when latency is missing', () =
   ], ['baseline', 'zeta-model', 'alpha-model']);
   assert.equal(recommendModel(input(benchmarkRun)).recommendedModelId, 'alpha-model');
 });
+
+test('quality gate rejects the fast low-pass model and keeps an eligible comparison model', () => {
+  const benchmarkRun = run([
+    ...[true,true,true,true].map((passed,i)=>result({modelId:'baseline',benchmarkId:'b'+i,passed,latency:300})),
+    ...[true,true,false,false].map((passed,i)=>result({modelId:'candidate',benchmarkId:'b'+i,passed,latency:20})),
+  ]);
+  const recommendation = recommendModel(input(benchmarkRun,{preference:'latency',minimumPassRatePercent:80}));
+  assert.equal(recommendation.recommendedModelId,'baseline');
+  assert.equal(recommendation.minimumPassRatePercent,80);
+  assert.equal(recommendation.candidates.find(c=>c.modelId==='candidate').eligible,false);
+  assert.match(recommendation.candidates.find(c=>c.modelId==='candidate').exclusionReasons.join(' '),/Below minimum pass rate/);
+  assert.match(recommendation.reason,/80% minimum/);
+});
+
+test('quality gate includes exact threshold and ranks qualified models by latency', () => {
+  const benchmarkRun=run([
+    ...[true,true,true,true,true].map((passed,i)=>result({modelId:'baseline',benchmarkId:'b'+i,passed,latency:300})),
+    ...[true,true,true,true,false].map((passed,i)=>result({modelId:'candidate',benchmarkId:'b'+i,passed,latency:50})),
+  ]);
+  assert.equal(recommendModel(input(benchmarkRun,{preference:'latency',minimumPassRatePercent:80})).recommendedModelId,'candidate');
+  assert.equal(recommendModel(input(benchmarkRun,{minimumPassRatePercent:100})).recommendedModelId,'baseline');
+});
+
+test('no qualifying model differs from insufficient evidence and never invents a winner', () => {
+  const benchmarkRun=run([
+    ...[true,false].map((passed,i)=>result({modelId:'baseline',benchmarkId:'b'+i,passed})),
+    ...[true,false].map((passed,i)=>result({modelId:'candidate',benchmarkId:'b'+i,passed})),
+  ]);
+  const rejected=recommendModel(input(benchmarkRun,{minimumPassRatePercent:80}));
+  assert.equal(rejected.status,'no_qualifying_model');
+  assert.equal(rejected.recommendedModelId,null);
+  assert.match(rejected.reason,/No model meets/);
+  assert.equal(recommendModel(input(benchmarkRun,{minimumEvaluations:3,minimumPassRatePercent:80})).status,'insufficient_evidence');
+});
+
+test('threshold uses unrounded counts, and zero disables the gate', () => {
+  const benchmarkRun=run(['baseline','candidate'].flatMap(modelId=>[true,true,false].map((passed,i)=>result({modelId,benchmarkId:'b'+i,passed}))));
+  assert.equal(recommendModel(input(benchmarkRun,{minimumPassRatePercent:66.68})).status,'no_qualifying_model');
+  assert.equal(recommendModel(input(benchmarkRun,{minimumPassRatePercent:0})).status,'recommended');
+  for (const minimumPassRatePercent of [-1,101,'80',NaN]) assert.throws(()=>recommendModel(input(benchmarkRun,{minimumPassRatePercent})),/Minimum pass rate/);
+});

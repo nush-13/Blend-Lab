@@ -1,6 +1,7 @@
-import { ModelResponse, GraphifyContext } from '../types';
+import { ModelResponse, GraphifyContext, ResponseSelection } from '../types';
 
 export interface PlaygroundResponses {
+  selection?: ResponseSelection;
   graphifyContext?: GraphifyContext | null;
   sourceA: ModelResponse;
   candidate: ModelResponse;
@@ -19,7 +20,7 @@ function response(modelName: string, roleName: string, status: ModelResponse['st
 export function createIdleResponses(modelAId: string, modelBId: string): PlaygroundResponses {
   return {
     sourceA: response(modelAId, 'Source Model A', 'idle', 'Run a prompt to generate a response.'),
-    candidate: response('Candidate', 'Candidate', 'idle', 'Run a prompt to generate a response.'),
+    candidate: response('Recommended answer', 'Recommended answer', 'idle', 'Run a prompt to generate a response.'),
     sourceB: response(modelBId, 'Source Model B', 'idle', 'Run a prompt to generate a response.'),
   };
 }
@@ -27,7 +28,7 @@ export function createIdleResponses(modelAId: string, modelBId: string): Playgro
 export function createPendingResponses(modelAId: string, modelBId: string): PlaygroundResponses {
   return {
     sourceA: response(modelAId, 'Source Model A', 'loading', ''),
-    candidate: response('Candidate', 'Candidate routing', 'loading', ''),
+    candidate: response('Recommended answer', 'Selecting by performance', 'loading', ''),
     sourceB: response(modelBId, 'Source Model B', 'loading', ''),
   };
 }
@@ -35,7 +36,7 @@ export function createPendingResponses(modelAId: string, modelBId: string): Play
 export function createFailedResponses(modelAId: string, modelBId: string, error: string): PlaygroundResponses {
   return {
     sourceA: response(modelAId, 'Source Model A', 'error', '', error),
-    candidate: response('Candidate', 'Candidate routing', 'error', '', error),
+    candidate: response('Recommended answer', 'Selecting by performance', 'error', '', error),
     sourceB: response(modelBId, 'Source Model B', 'error', '', error),
   };
 }

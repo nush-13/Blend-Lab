@@ -18,6 +18,7 @@ export const BlendPilotEvidence: React.FC<BlendPilotEvidenceProps> = ({ isOllama
   const [comparisonModelId, setComparisonModelId] = useState('');
   const [preference, setPreference] = useState<BlendPilotPreference>('correctness');
   const [minimumEvaluations, setMinimumEvaluations] = useState(2);
+  const [minimumPassRatePercent, setMinimumPassRatePercent] = useState(80);
   const [result, setResult] = useState<BlendPilotRecommendationResult | null>(null);
   const [isLoadingRuns, setIsLoadingRuns] = useState(true);
   const [isRecommending, setIsRecommending] = useState(false);
@@ -47,7 +48,7 @@ export const BlendPilotEvidence: React.FC<BlendPilotEvidenceProps> = ({ isOllama
     ? [...new Set(selectedRun.results.filter(item => item.category === selectedCategory).map(item => item.modelId))]
     : [];
   const currentRequestKey = selectedRun && selectedCategory && comparisonModelId
-    ? blendPilotRequestKey({ runId: selectedRun.runId, category: selectedCategory, comparisonModelId, preference, minimumEvaluations })
+    ? blendPilotRequestKey({ runId: selectedRun.runId, category: selectedCategory, comparisonModelId, preference, minimumEvaluations, minimumPassRatePercent })
     : '';
   recommendationRequestKey.current = currentRequestKey;
 
@@ -94,6 +95,7 @@ export const BlendPilotEvidence: React.FC<BlendPilotEvidenceProps> = ({ isOllama
         comparisonModelId,
         preference,
         minimumEvaluations,
+        minimumPassRatePercent,
       });
       if (requestVersion.current === activeRequestVersion && recommendationRequestKey.current === activeRequestKey) setResult(recommendation);
     } catch (reason) {
@@ -165,10 +167,14 @@ export const BlendPilotEvidence: React.FC<BlendPilotEvidenceProps> = ({ isOllama
                     ))}
                   </div>
                 </fieldset>
+                <label className="block text-xs font-black">Minimum pass rate (%)
+                  <input type="number" min="0" max="100" step="1" value={minimumPassRatePercent} onChange={event => { setMinimumPassRatePercent(Number(event.target.value)); setResult(null); }} className="block w-full mt-1 px-2 py-2 bg-white border-2 border-black rounded-lg text-xs font-mono" />
+                  <span className="block mt-1 text-[11px] font-bold text-[#555]">Models below this pass rate are excluded before ranking. Applies only to evaluated cases in this run/category; 0% disables the pass-rate gate.</span>
+                </label>
                 <label className="block text-xs font-black">Minimum valid evaluations
                   <input type="number" min="1" max="100" value={minimumEvaluations} onChange={event => { setMinimumEvaluations(Number(event.target.value)); setResult(null); }} className="block w-full mt-1 px-2 py-2 bg-white border-2 border-black rounded-lg text-xs font-mono" />
                 </label>
-                <button onClick={() => void handleRecommend()} disabled={!isOllama || !selectedCategoryModelIds.length || !comparisonModelId || minimumEvaluations < 1 || minimumEvaluations > 100 || isRecommending} className="w-full py-3 bg-[#FFDE00] border-2 border-black rounded-xl text-xs font-black text-black shadow-[3px_3px_0px_#000] neo-btn flex items-center justify-center gap-2 disabled:opacity-50">
+                <button onClick={() => void handleRecommend()} disabled={!isOllama || !selectedCategoryModelIds.length || !comparisonModelId || minimumEvaluations < 1 || minimumEvaluations > 100 || !Number.isFinite(minimumPassRatePercent) || minimumPassRatePercent < 0 || minimumPassRatePercent > 100 || isRecommending} className="w-full py-3 bg-[#FFDE00] border-2 border-black rounded-xl text-xs font-black text-black shadow-[3px_3px_0px_#000] neo-btn flex items-center justify-center gap-2 disabled:opacity-50">
                   <Compass className={`w-4 h-4 ${isRecommending ? 'animate-spin' : ''}`} />
                   {isRecommending ? 'Comparing evidence…' : 'Calculate from saved evidence'}
                 </button>
@@ -182,14 +188,14 @@ export const BlendPilotEvidence: React.FC<BlendPilotEvidenceProps> = ({ isOllama
               {!result ? (
                 <div className="py-12 text-center text-xs font-bold text-[#666]">
                   <p>Select saved evidence and calculate a recommendation.</p>
-                  <p className="mt-2">Minimum evaluations are required for both the comparison model and recommended alternative.</p>
+                  <p className="mt-2">Models must meet the minimum evaluation count and pass rate before ranking. The comparison model can remain the recommended choice.</p>
                 </div>
               ) : (
                 <>
                   <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b-2 border-black/10">
                     <div>
-                      <span className="text-[10px] font-black uppercase text-[#666]">{result.status === 'recommended' ? 'Recommended alternative' : 'Recommendation unavailable'}</span>
-                      <h3 className="font-display font-black text-xl mt-1">{result.recommendedModelId || 'Insufficient evidence'}</h3>
+                      <span className="text-[10px] font-black uppercase text-[#666]">{result.status === 'recommended' ? 'Recommended model' : 'Recommendation unavailable'}</span>
+                      <h3 className="font-display font-black text-xl mt-1">{result.recommendedModelId || (result.status === 'no_qualifying_model' ? 'No model meets your requirement' : 'Insufficient evidence')}</h3>
                     </div>
                     <span className="text-[10px] font-mono font-black bg-[#FFE277] border-2 border-black px-2 py-1 rounded-md">{result.preference}-first</span>
                   </div>
@@ -199,10 +205,11 @@ export const BlendPilotEvidence: React.FC<BlendPilotEvidenceProps> = ({ isOllama
                     <p>Category: {displayCategory(result.category)}</p>
                     <p>Compared against: {result.comparisonModelId}</p>
                     <p>Minimum valid evaluations: {result.minimumEvaluations}</p>
+                    <p>Minimum pass rate: {result.minimumPassRatePercent}%</p>
                   </div>
                   <div className="mt-4 overflow-x-auto border-2 border-black rounded-xl">
                     <table className="w-full min-w-[670px] text-left text-[10px]">
-                      <thead className="bg-[#FFE277] border-b-2 border-black"><tr>{['Model', 'Evaluated', 'Passed', 'Pass rate', 'Failed inference', 'Evaluation N/A', 'Median wall ms (n)', 'Evidence cases'].map(label => <th key={label} className="p-2 font-black">{label}</th>)}</tr></thead>
+                      <thead className="bg-[#FFE277] border-b-2 border-black"><tr>{['Model', 'Evaluated', 'Passed', 'Pass rate', 'Eligibility', 'Failed inference', 'Evaluation N/A', 'Median wall ms (n)', 'Evidence cases'].map(label => <th key={label} className="p-2 font-black">{label}</th>)}</tr></thead>
                       <tbody>
                         {result.candidates.map(candidate => (
                           <tr key={candidate.modelId} className={`border-b border-black/10 ${candidate.modelId === result.recommendedModelId ? 'bg-[#38E05A]/15' : ''}`}>
@@ -210,6 +217,7 @@ export const BlendPilotEvidence: React.FC<BlendPilotEvidenceProps> = ({ isOllama
                             <td className="p-2">{candidate.evaluatedCount}</td>
                             <td className="p-2">{candidate.passedCount}</td>
                             <td className="p-2">{displayValue(candidate.passRatePercent, '%')}</td>
+                            <td className="p-2">{candidate.eligible ? 'Meets requirements' : candidate.exclusionReasons?.join('; ') || 'Unavailable'}</td>
                             <td className="p-2">{candidate.inferenceFailedCount}</td>
                             <td className="p-2">{candidate.unavailableEvaluationCount}</td>
                             <td className="p-2">{displayValue(candidate.medianWallLatencyMs)} (n={candidate.latencySampleCount})</td>

@@ -1,3 +1,4 @@
+import { selectResponse } from './select-response.mjs';
 import express from 'express';
 import { createGraphify } from './graphify.mjs';
 import { randomUUID } from 'node:crypto';
@@ -85,7 +86,7 @@ export function createApp({
     onResponse?.(response.status);
     const data = await parseOllamaResponse(response);
     if (!response.ok || data.error) {
-      const error = new Error(data.error || `Ollama returned HTTP ${response.status}`);
+      const error = new Error(response.status === 401 || data.error === 'unauthorized' ? 'Ollama Cloud sign-in required. Run ollama signin in PowerShell, complete browser sign-in, then retry.' : data.error || `Ollama returned HTTP ${response.status}`);
       error.status = response.status === 404 ? 404 : 502;
       throw error;
     }
@@ -319,12 +320,13 @@ export function createApp({
     } catch (error) { next(error); }
   });
   app.post('/api/ollama/blendpilot/recommendation', async (req, res, next) => {
-    const { runId, category, comparisonModelId, preference, minimumEvaluations } = req.body || {};
+    const { runId, category, comparisonModelId, preference, minimumEvaluations, minimumPassRatePercent = 0 } = req.body || {};
     const supportedCategories = new Set(BENCHMARKS.map(benchmark => benchmark.category));
     if (typeof runId !== 'string' || !runId.trim() || runId.length > 100 ||
         typeof category !== 'string' || !supportedCategories.has(category) ||
         typeof comparisonModelId !== 'string' || !comparisonModelId.trim() || comparisonModelId.length > 200 ||
         !['correctness', 'latency'].includes(preference) ||
+        !Number.isFinite(minimumPassRatePercent) || minimumPassRatePercent < 0 || minimumPassRatePercent > 100 ||
         !Number.isInteger(minimumEvaluations) || minimumEvaluations < 1 || minimumEvaluations > 100) {
       return res.status(400).json({ error: 'Invalid benchmark run, category, comparison model, preference, or evidence threshold.' });
     }
@@ -334,7 +336,7 @@ export function createApp({
       if (!run.modelIds.includes(comparisonModelId)) {
         return res.status(400).json({ error: 'Comparison model is not part of the selected benchmark run.' });
       }
-      res.json(recommendModel({ run, category, comparisonModelId, preference, minimumEvaluations }));
+      res.json(recommendModel({ run, category, comparisonModelId, preference, minimumEvaluations, minimumPassRatePercent }));
     } catch (error) { next(error); }
   });
   app.post('/api/ollama/benchmark-runs', async (req, res, next) => {
@@ -396,10 +398,10 @@ export function createApp({
     } catch (error) { next(error); }
   });
   app.post('/api/ollama/compare', async (req, res, next) => {
-    const { prompt, modelA, modelB, ratioB = 40, temperature = 0.7, topP = 0.9, maxTokens = 1024, timeoutSeconds = 180, useGraphifyContext = false } = req.body;
+    const { prompt, modelA, modelB, selectionPreference = 'latency', temperature = 0.7, topP = 0.9, maxTokens = 1024, timeoutSeconds = 180, useGraphifyContext = false } = req.body;
     if (typeof useGraphifyContext !== 'boolean' || typeof prompt !== 'string' || !prompt.trim() || prompt.length > 32000 ||
         ![modelA, modelB].every(m => typeof m === 'string' && m.length > 0 && m.length <= 200) ||
-        !Number.isFinite(ratioB) || ratioB < 0 || ratioB > 100 ||
+        !['latency', 'throughput'].includes(selectionPreference) ||
         !Number.isFinite(temperature) || temperature < 0 || temperature > 2 ||
         !Number.isFinite(topP) || topP <= 0 || topP > 1 ||
         !Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 8192 ||
@@ -430,24 +432,16 @@ export function createApp({
       const sourceB = modelA === modelB
         ? { ...sourceA, roleName: 'Ollama model B · reused from A', provenance: 'reused', reusedFrom: 'sourceA' }
         : { ...await infer('sourceB', modelB), roleName: 'Ollama model B', provenance: 'inference', measurementSource: 'sourceB' };
-      const routedFrom = ratioB > 50 ? 'sourceB' : 'sourceA';
-      const routedResponse = routedFrom === 'sourceB' ? sourceB : sourceA;
-      logInference({
-        event: 'candidate_routed', comparisonRequestId, ratioB,
-        policy: 'A when ratioB <= 50; B when ratioB > 50', routedFrom,
-        selectedModelId: routedFrom === 'sourceB' ? modelB : modelA,
-        actualSubmittedModelId: null, measurementSource: routedResponse.measurementSource,
-      });
-      res.json({
-        graphifyContext: graphContext,
-        sourceA: { ...sourceA, roleName: 'Ollama model A' },
-        sourceB,
-        candidate: {
-          ...routedResponse,
-          roleName: `Routed entirely to ${routedFrom === 'sourceB' ? 'B' : 'A'} at ${ratioB}% · no weight merge`,
-          provenance: 'routed', routedFrom,
-        },
-      });
+      const selection = selectResponse(sourceA, sourceB, selectionPreference);
+      const selected = selection.source === 'sourceA' ? sourceA : selection.source === 'sourceB' ? sourceB : null;
+      const candidate = selected ? {
+        ...selected, roleName: 'Recommended for performance', provenance: 'recommended', selectedFrom: selection.source,
+      } : {
+        modelName: 'No measured winner', roleName: 'No recommendation', status: 'idle', provenance: 'none', text: selection.reason, error: null,
+        inputTokens:null,outputTokens:null,tokPerSec:null,latencyMs:null,generationMs:null,ollamaTotalMs:null,promptProcessingMs:null,loadMs:null,timestamp:'',contextUsed:null,
+      };
+      logInference({ event:'response_selected',comparisonRequestId,preference:selectionPreference,selectedFrom:selection.source,actualSubmittedModelId:null });
+      res.json({graphifyContext:graphContext,sourceA,sourceB,candidate,selection});
     } catch (error) { next(controller.signal.aborted ? Object.assign(new Error('Ollama request timed out or was cancelled. Try fewer tokens or a longer timeout.'), { status: 504 }) : error); }
     finally { clearTimeout(timer); res.off('close', disconnect); }
   });

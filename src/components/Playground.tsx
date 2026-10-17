@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ModelInfo, MergeMethod, ModelResponse, BlendConfiguration, GraphifyContext } from '../types';
+import { ModelInfo, MergeMethod, ModelResponse, BlendConfiguration, GraphifyContext, ResponseSelection } from '../types';
 import { createFailedResponses, createIdleResponses, createPendingResponses } from '../services/playgroundState';
-import { BlendSlider } from './BlendSlider';
+import { ModelComparisonControls } from './ModelComparisonControls';
 import { 
   Plus, 
   Send, 
@@ -22,10 +22,6 @@ interface PlaygroundProps {
   canGenerate: boolean;
   modelA: ModelInfo;
   modelB: ModelInfo;
-  ratioB: number;
-  onChangeRatioB: (ratio: number) => void;
-  mergeMethod: MergeMethod;
-  onChangeMethod: (method: MergeMethod) => void;
   onOpenModelSelectA: () => void;
   onOpenModelSelectB: () => void;
   onGenerateResponses: (prompt: string, config: BlendConfiguration) => Promise<{
@@ -33,6 +29,7 @@ interface PlaygroundProps {
     candidate: ModelResponse;
     sourceB: ModelResponse;
     graphifyContext?: GraphifyContext | null;
+    selection?: ResponseSelection;
   }>;
 }
 
@@ -41,10 +38,6 @@ export const Playground: React.FC<PlaygroundProps> = ({
   canGenerate,
   modelA,
   modelB,
-  ratioB,
-  onChangeRatioB,
-  mergeMethod,
-  onChangeMethod,
   onOpenModelSelectA,
   onOpenModelSelectB,
   onGenerateResponses
@@ -54,7 +47,8 @@ export const Playground: React.FC<PlaygroundProps> = ({
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'duo' | 'trio'>('duo');
+  const [viewMode, setViewMode] = useState<'duo' | 'trio'>('trio');
+  const [selectionPreference,setSelectionPreference]=useState<'latency'|'throughput'>('latency');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [useGraphifyContext, setUseGraphifyContext] = useState(false);
   const [graphifyContext, setGraphifyContext] = useState<GraphifyContext | null>(null);
@@ -68,7 +62,7 @@ export const Playground: React.FC<PlaygroundProps> = ({
     setError(null);
     setGraphifyContext(null);
     setResponses(createIdleResponses(modelA.id, modelB.id));
-  }, [modelA.id, modelB.id, ratioB, useGraphifyContext]);
+  }, [modelA.id, modelB.id, selectionPreference, useGraphifyContext]);
 
   const promptPresets = [
     {
@@ -110,11 +104,10 @@ export const Playground: React.FC<PlaygroundProps> = ({
       id: `blend-${Date.now()}`,
       modelA,
       modelB,
-      ratioA: 100 - ratioB,
-      ratioB,
-      method: mergeMethod,
-      candidateName: `BLEND-LAB-c${ratioB}-${mergeMethod}`,
-      candidateTag: `sweep_${String(ratioB).padStart(3, '0')} · Q4_K_M · t=${ratioB}%`,
+      selectionPreference,
+      ratioA: 50, ratioB: 50, method: 'linear',
+      candidateName: 'Recommended answer',
+      candidateTag: 'Measured performance',
       quantization: 'Q4_K_M'
     };
 
@@ -142,27 +135,11 @@ export const Playground: React.FC<PlaygroundProps> = ({
   const formatGeneration = (response: ModelResponse) => response.status === 'success' && response.generationMs === null
     ? 'N/A (eval_duration unavailable)'
     : formatMetric(response.generationMs, ' ms');
-  const candidateOrigin = responses.candidate.provenance === 'routed'
-    ? `Routed from ${responses.candidate.routedFrom === 'sourceB' ? 'B' : 'A'}${responses.candidate.measurementSource && responses.candidate.measurementSource !== responses.candidate.routedFrom ? ` · inference from ${responses.candidate.measurementSource === 'sourceA' ? 'A' : 'B'}` : ''}`
-    : responses.candidate.provenance === 'demo' ? 'Simulated response' : 'Candidate';
+  const candidateOrigin = responses.candidate.provenance === 'recommended' ? 'Selected by measurement' : 'No measured recommendation';
 
   return (
     <div className="space-y-6">
-      {/* Blend Slider Stage */}
-      <BlendSlider
-        isOllama={isOllama}
-        modelA={modelA}
-        modelB={modelB}
-        ratioB={ratioB}
-        onChangeRatioB={onChangeRatioB}
-        mergeMethod={mergeMethod}
-        onChangeMethod={onChangeMethod}
-        candidateTag={isOllama ? 'Ollama model routing' : `Demo sweep ${ratioB}%`}
-        contextUsed={responses.candidate.contextUsed}
-        maxContext={modelA.contextWindow}
-        onOpenModelSelectA={onOpenModelSelectA}
-        onOpenModelSelectB={onOpenModelSelectB}
-      />
+      <ModelComparisonControls modelA={modelA} modelB={modelB} onSelectA={onOpenModelSelectA} onSelectB={onOpenModelSelectB} preference={selectionPreference} onPreferenceChange={setSelectionPreference} disabled={isLoading} />
 
       {/* Prompt Composer Bar (Styled like the exact search/input bar + yellow plus button from the screenshot!) */}
       <div>
@@ -261,7 +238,7 @@ export const Playground: React.FC<PlaygroundProps> = ({
                 : 'bg-white text-black shadow-[2px_2px_0px_#000]'
             }`}
           >
-            Candidate vs Source A
+            Recommendation vs Model A
           </button>
           <button
             onClick={() => setViewMode('trio')}
@@ -276,7 +253,7 @@ export const Playground: React.FC<PlaygroundProps> = ({
         </div>
 
         <div className="text-xs font-mono font-bold text-black hidden sm:block">
-          Candidate speed: <strong>{formatMetric(responses.candidate.tokPerSec, ' tok/s')}</strong>
+          Selected response speed: <strong>{formatMetric(responses.candidate.tokPerSec, ' tok/s')}</strong>
         </div>
       </div>
 
@@ -369,14 +346,14 @@ export const Playground: React.FC<PlaygroundProps> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <h4 className="font-display font-black text-base text-black">
-                      {responses.candidate.modelName}
+                      {responses.candidate.provenance === 'recommended' ? 'Recommended: ' : ''}{responses.candidate.modelName}
                     </h4>
                     <span className="text-[10px] font-black bg-[#FF4F84] text-white px-2 py-0.5 rounded-md border border-black shadow-[1px_1px_0px_#000]">
-                      {responses.candidate.provenance === 'routed' ? 'ROUTED' : isOllama ? 'OLLAMA' : 'DEMO'}
+                      {responses.candidate.provenance === 'recommended' ? 'SELECTED' : isOllama ? 'OLLAMA' : 'DEMO'}
                     </span>
                   </div>
                   <p className="text-[11px] font-bold font-mono text-[#555]">
-                    {responses.candidate.roleName}
+                    {responses.selection?.reason || responses.candidate.roleName}
                   </p>
                 </div>
                 <button
@@ -488,7 +465,7 @@ export const Playground: React.FC<PlaygroundProps> = ({
       </div>
 
       <p className="text-center text-xs font-bold text-[#555]">
-        {isOllama ? 'Responses come from installed Ollama models. The routed candidate reuses the selected source output; no weights are merged.' : 'Demo responses are simulated.'}
+        {isOllama ? 'The recommendation selects an existing successful response using measured performance. Answer correctness is not graded in this playground.' : 'Demo responses are simulated.'}
       </p>
     </div>
   );

@@ -25,9 +25,9 @@ This document describes the inspected source, not a fresh runtime certification.
 - Switch between two panels (A and candidate) and three panels (A, candidate, B). Answers can be copied.
 - Run sends the same prompt and sampling settings to both models, sequentially to reduce memory pressure. Selecting the same ID generates once and marks the second response as reused.
 - Panels report actual model IDs, input/output tokens, wall-clock latency, generation duration, total Ollama duration, and throughput when metadata is available. Missing measurements remain N/A. Failure and pending states are separate from successful output.
-- The ratio slider is **routing**, not blending: 0–50% selects all of A's response; above 50% selects all of B's. The candidate reuses the selected response and its measurements; it is not a third inference. Merge-method controls are hidden in Ollama mode.
+- The ratio slider has been removed. Select lowest response time or highest generation speed. The recommendation reuses the winning successful response and its measurements; it is not a third inference or a correctness assessment. Missing metrics produce no measured winner.
 - Demo mode exists explicitly for canned Playground output. Do not confuse it with actual inference or benchmark evidence.
-- Prompt/response state is transient; the global Reset currently resets the routing ratio to 40 rather than clearing a conversation.
+- Prompt/response state is transient. Changing models, performance preference, or Graphify context clears the displayed comparison.
 
 ### Graphify context — repository-grounded coding prompts
 
@@ -59,9 +59,9 @@ Pass rate uses valid evaluated results; absent metrics remain unavailable. Model
 
 Choose a completed run, benchmark category, comparison model, correctness-first or latency-first preference, and minimum valid evaluation count (default two). The backend summarizes evaluated/pass counts and successful wall-latency samples in that category.
 
-Eligible alternative models must meet the evidence threshold. Correctness-first ranks by pass rate; latency-first ranks by median successful wall latency, with pass rate as a tie-breaker. The result displays its selected model, supporting counts, baseline comparison, and rationale. Missing evidence returns **insufficient_evidence**, not an invented recommendation.
+Eligible models must meet both the valid-evaluation count and the configurable minimum pass rate (default 80% in the UI). Correctness-first ranks by pass rate; latency-first ranks by median successful wall latency, with pass rate as a tie-breaker. The result displays its selected model, supporting counts, baseline comparison, and rationale. Missing evidence returns **insufficient_evidence**, not an invented recommendation.
 
-Important limit: it chooses among alternatives to the selected comparison model. It does not guarantee the recommended alternative outperforms that baseline. It is not a weighted workload optimizer, Pareto solver, or merge-configuration generator. Recommendations do not run new inference or tests.
+The comparison model is included in ranking and can remain the recommended choice. Models below the quality threshold cannot win either ranking. It is not a weighted workload optimizer, Pareto solver, or merge-configuration generator. Recommendations do not run new inference or tests.
 
 ### Experiments — named, repeatable configurations
 
@@ -85,7 +85,7 @@ Saved runs → Capability Curve / BlendPilot / Experiment comparisons
 ```
 
 - `src/App.tsx` owns navigation, current model selections, settings, model refresh, and experiment history.
-- `server/app.mjs` validates API inputs, discovers models, orchestrates inference, runs benchmarks, and exposes experiment/recommendation endpoints. Its shared `inferModel()` normalizes metadata and failures. Development logs identify individual requests and routing provenance.
+- `server/app.mjs` validates API inputs, discovers models, orchestrates inference, runs benchmarks, and exposes experiment/recommendation endpoints. Its shared `inferModel()` normalizes metadata and failures. Development logs identify individual requests and response-selection provenance.
 - `.blendlab-data/benchmark-runs.json` stores run progress/results; `.blendlab-data/experiments.json` stores named configurations linked by runId. Stores serialize writes through temporary files and rename. They are local JSON stores, not a multi-process database.
 - Previously running records with no active execution are marked failed when read after a process restart. Browser navigation does not itself cancel backend benchmark execution.
 - Playground results, settings, and recommendations are not durable history. Do not promise SQLite, authentication, deployment hardening, or automatic regression alerts.
@@ -147,3 +147,11 @@ Verification for this addition: TypeScript checks, 44 backend tests plus 15 serv
 ### Graph node colours
 
 Edit `graphify-colors.json` in the project root. `palette` lists six-digit hex colours in group order; `groupColors` optionally pins a specific community ID, for example `"0": "#45B7D1"`. Reload the map after saving; no index rebuild is needed for colour changes. Nodes and legend are recoloured together, while existing community memberships, names, IDs, and graph relationships remain unchanged. The current code-only, no-cluster index may produce only Community 0, so only its assigned colour appears until Graphify produces additional groups.
+
+### Minimum pass-rate gate: implementation details
+
+`minimumPassRatePercent` flows from BlendPilot UI through `BlendPilotRequest`, the request-identity key, and `/api/ollama/blendpilot/recommendation` to `recommendModel`. The API accepts finite numbers from 0 to 100; omitted values default to 0 for older callers. Eligibility compares raw passed/evaluated counts rather than the rounded display percentage. Candidate evidence includes `eligible` and `exclusionReasons`. `no_qualifying_model` means adequately measured models missed the gate; `insufficient_evidence` means the minimum evidence or required metrics are missing. The UI clears stale recommendations when the threshold changes. Existing comparison-model evidence checks still apply.
+
+## Gemma 4 cloud comparison
+
+Register the cloud reference with `ollama pull gemma4:cloud`, then run `ollama signin` and finish browser sign-in. This does not download the model weights; inference runs on Ollama Cloud and requires internet/account access. Click Refresh models in BlendLab. Default selection pairs a local model with a different available cloud model, while preserving existing distinct selections. Model A and B execute independently when their IDs differ; identical IDs intentionally reuse one inference. Cloud models are labelled, and prompts plus enabled Graphify source excerpts are sent to the cloud provider. Use only local models for prompts or source code that must remain on your machine.

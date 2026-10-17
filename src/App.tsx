@@ -8,6 +8,7 @@ import {
   ActiveTab
 } from './types';
 import { apiService, AVAILABLE_MODELS } from './services/api';
+import { selectComparisonModels } from './services/ollamaModels';
 import { Navigation } from './components/Navigation';
 import { Playground } from './components/Playground';
 import { CapabilityCurve } from './components/CapabilityCurve';
@@ -45,8 +46,9 @@ export default function App() {
       setAvailableModels(models);
       if (!models.length) setModelError('Ollama has no installed models. Install a model in Ollama, then refresh.');
       if (models.length) {
-        setModelA(previous => models.find(m => m.id === previous.id) || models[0]);
-        setModelB(previous => models.find(m => m.id === previous.id) || models[1] || models[0]);
+        const selected = selectComparisonModels(models, modelA.id, modelB.id);
+        setModelA(selected.modelA);
+        setModelB(selected.modelB);
       }
     } catch (error) {
       setAvailableModels([]);
@@ -101,8 +103,10 @@ export default function App() {
         {/* Tab Content Views */}
         <main className="flex-1 mt-2">
           <div className="mb-5 p-3 bg-white border-2 border-black rounded-xl text-xs font-bold flex flex-wrap items-center gap-3">
-            <span>{settings.backendMode === 'ollama' ? 'Ollama local inference. Candidate routes to A at 0–50%, B above 50%; no weight merging.' : 'Demo mode: responses are simulated.'} Capability Curve, Benchmarks, BlendPilot, and Experiments use saved benchmark evidence.</span>
+            <span>{settings.backendMode === 'ollama' ? 'Ollama inference (local or cloud). Responses are compared by measured latency or generation speed. No blending or automatic correctness judgment.' : 'Demo mode: responses are simulated.'} Capability Curve, Benchmarks, BlendPilot, and Experiments use saved benchmark evidence.</span>
             <button className="underline shrink-0" onClick={refreshModels} disabled={modelsLoading}>{modelsLoading ? 'Loading models…' : 'Refresh models'}</button>
+            {settings.backendMode === 'ollama' && (modelA.executionMode === 'cloud' || modelB.executionMode === 'cloud') && <span className="text-[#6B3B00]">Cloud model selected: prompts and enabled Graphify excerpts are sent to Ollama Cloud. Internet and Ollama sign-in are required.</span>}
+            {settings.backendMode === 'ollama' && modelA.id === modelB.id && <span>Same model in both slots: one inference is reused. Choose different models for an independent comparison.</span>}
             {modelError && <span role="alert" className="text-red-700">{modelError}</span>}
             {experimentLoadError && <span role="alert" className="text-red-700">Saved experiment history unavailable: {experimentLoadError}</span>}
           </div>
@@ -113,10 +117,6 @@ export default function App() {
               canGenerate={!modelsLoading && availableModels.length > 0}
               modelA={modelA}
               modelB={modelB}
-              ratioB={ratioB}
-              onChangeRatioB={setRatioB}
-              mergeMethod={mergeMethod}
-              onChangeMethod={setMergeMethod}
               onOpenModelSelectA={() => setModelSelectSlot('Model A')}
               onOpenModelSelectB={() => setModelSelectSlot('Model B')}
               onGenerateResponses={apiService.generatePlaygroundResponses.bind(apiService)}

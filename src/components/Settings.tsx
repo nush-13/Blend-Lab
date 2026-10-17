@@ -105,7 +105,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
               <label className="block">Inference mode
                 <select aria-label="Inference mode" value={settings.backendMode} onChange={e => onUpdateSettings({ backendMode: e.target.value as 'ollama' | 'mock' })} className="ml-3 border-2 border-black rounded p-2">
-                  <option value="ollama">Ollama (real local inference)</option>
+                  <option value="ollama">Ollama (local and cloud models)</option>
                   <option value="mock">Demo (simulated)</option>
                 </select>
               </label>

@@ -1,3 +1,4 @@
+import { describeOllamaModel } from './ollamaModels';
 import {
   ModelInfo,
   BlendConfiguration,
@@ -10,6 +11,7 @@ import {
   ExperimentComparison,
   ModelResponse,
   GraphifyContext,
+  ResponseSelection,
   SettingsState
 } from '../types';
 
@@ -106,13 +108,7 @@ class BlendLabApiService {
   async getModels(): Promise<ModelInfo[]> {
     if (this.settings.backendMode === 'mock') return AVAILABLE_MODELS;
     const data = await this.ollamaRequest('/models');
-    return data.models.map((model: any) => ({
-      id: model.name, name: model.name, family: model.details?.family || 'Unknown',
-      parameterCount: model.details?.parameter_size || 'Unknown', contextWindow: 0,
-      architecture: model.details?.format || 'Ollama', baseSpecialization: 'general',
-      defaultQuantization: model.details?.quantization_level || 'Unknown',
-      tags: ['Installed in Ollama'], description: 'Installed local Ollama model. Context limit is model dependent.',
-    }));
+    return data.models.map(describeOllamaModel);
   }
 
   // --- Prompt Playground Generator ---
@@ -124,10 +120,11 @@ class BlendLabApiService {
     candidate: ModelResponse;
     sourceB: ModelResponse;
     graphifyContext?: GraphifyContext | null;
+    selection?: ResponseSelection;
   }> {
     if (this.settings.backendMode === 'ollama') {
       return this.ollamaRequest('/compare', {
-        prompt, modelA: config.modelA.id, modelB: config.modelB.id, ratioB: config.ratioB,
+        prompt, modelA: config.modelA.id, modelB: config.modelB.id, selectionPreference: config.selectionPreference ?? 'latency',
         useGraphifyContext: config.useGraphifyContext ?? false,
         temperature: this.settings.defaultTemperature, topP: this.settings.defaultTopP,
         maxTokens: this.settings.defaultMaxTokens, timeoutSeconds: this.settings.requestTimeoutSeconds,

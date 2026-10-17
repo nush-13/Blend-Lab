@@ -1,4 +1,5 @@
 export interface ModelInfo {
+  executionMode?: 'local' | 'cloud';
   id: string;
   name: string;
   family: string;
@@ -30,6 +31,7 @@ export type MergeMethod =
   | 'mlp_only';
 
 export interface BlendConfiguration {
+  selectionPreference?: 'latency' | 'throughput';
   useGraphifyContext?: boolean;
   id: string;
   modelA: ModelInfo;
@@ -52,7 +54,8 @@ export interface ModelResponse {
   roleName: string;
   text: string;
   status: 'idle' | 'loading' | 'success' | 'error' | 'demo';
-  provenance: 'inference' | 'routed' | 'reused' | 'demo' | 'none';
+  selectedFrom?: 'sourceA' | 'sourceB';
+  provenance: 'recommended' | 'inference' | 'routed' | 'reused' | 'demo' | 'none';
   measurementSource?: 'sourceA' | 'sourceB';
   routedFrom?: 'sourceA' | 'sourceB';
   reusedFrom?: 'sourceA' | 'sourceB';
@@ -181,6 +184,7 @@ export interface BenchmarkRun {
 export type BlendPilotPreference = 'correctness' | 'latency';
 
 export interface BlendPilotRequest {
+  minimumPassRatePercent?: number;
   runId: string;
   category: BenchmarkCategory;
   comparisonModelId: string;
@@ -189,6 +193,8 @@ export interface BlendPilotRequest {
 }
 
 export interface BlendPilotModelEvidence {
+  eligible?: boolean;
+  exclusionReasons?: string[];
   modelId: string;
   evaluatedCount: number;
   passedCount: number;
@@ -201,7 +207,8 @@ export interface BlendPilotModelEvidence {
 }
 
 export interface BlendPilotRecommendationResult {
-  status: 'recommended' | 'insufficient_evidence';
+  status: 'recommended' | 'insufficient_evidence' | 'no_qualifying_model';
+  minimumPassRatePercent: number;
   runId: string | null;
   category: string;
   comparisonModelId: string;
@@ -266,3 +273,5 @@ export interface GraphifyContext {
   retrievalMs: number;
   truncated: boolean;
 }
+
+export interface ResponseSelection { source: 'sourceA' | 'sourceB' | null; status: 'selected' | 'unavailable'; preference: 'latency' | 'throughput'; reason: string; }

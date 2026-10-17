@@ -92,14 +92,15 @@ test('discovers models and compares via HTTP with measured telemetry and forward
   assert.equal(data.sourceB.promptProcessingMs, 100);
   assert.equal(data.sourceA.loadMs, 300);
   assert.equal(data.sourceB.loadMs, 300);
-  assert.equal(data.candidate.modelName, 'b');
-  assert.equal(data.candidate.provenance, 'routed');
-  assert.equal(data.candidate.routedFrom, 'sourceB');
-  assert.equal(data.candidate.roleName, 'Routed entirely to B at 75% · no weight merge');
-  assert.equal(data.candidate.outputTokens, 15);
-  assert.equal(data.candidate.generationMs, data.sourceB.generationMs);
-  assert.equal(data.candidate.ollamaTotalMs, data.sourceB.ollamaTotalMs);
-  assert.equal(data.candidate.measurementSource, 'sourceB');
+  assert.equal(data.candidate.modelName, 'a');
+  assert.equal(data.candidate.provenance, 'recommended');
+  assert.equal(data.candidate.selectedFrom, 'sourceA');
+  assert.equal(data.candidate.roleName, 'Recommended for performance');
+  assert.equal(data.candidate.outputTokens, 12);
+  assert.equal(data.candidate.generationMs, data.sourceA.generationMs);
+  assert.equal(data.candidate.ollamaTotalMs, data.sourceA.ollamaTotalMs);
+  assert.equal(data.candidate.measurementSource, 'sourceA');
+  assert.match(data.selection.reason, /12.5 ms/);
   assert.equal(data.sourceA.tokPerSec, 6);
   assert.equal(data.sourceB.tokPerSec, 5);
   assert.deepEqual(calls.map(call => call.model), ['a', 'b']);
@@ -139,27 +140,33 @@ test('development logs uniquely identify each submitted model and its own Ollama
   assert.deepEqual(completed.map(record => record.ollamaGenerationDurationNs), [2e9, 3e9]);
   assert.deepEqual(completed.map(record => record.ollamaTotalDurationNs), [4e9, 6e9]);
   assert.ok(completed.every(record => Date.parse(record.endTimestamp) >= Date.parse(record.startTimestamp)));
-  const routed = logs.find(record => record.event === 'candidate_routed');
-  assert.equal(routed.routedFrom, 'sourceB');
+  const routed = logs.find(record => record.event === 'response_selected');
+  assert.ok(['sourceA','sourceB'].includes(routed.selectedFrom));
   assert.equal(routed.actualSubmittedModelId, null);
 });
-test('same model is generated once and midpoint routes to A', async t => {
+test('same model is generated once with no independent performance winner', async t => {
   const { url, calls } = await setup(t);
   const data = await (await compare(url, { ...payload, modelB: 'a', ratioB: 50 })).json();
   assert.equal(calls.length, 1);
   assert.equal(data.candidate.modelName, 'a');
   assert.equal(data.sourceB.provenance, 'reused');
   assert.equal(data.sourceB.reusedFrom, 'sourceA');
-  assert.equal(data.candidate.routedFrom, 'sourceA');
+  assert.equal(data.candidate.selectedFrom, 'sourceA');
 });
-test('candidate routing uses A through 50% and B above 50%', async t => {
-  const { url } = await setup(t);
-  for (const [ratioB, expectedSource] of [[0, 'sourceA'], [50, 'sourceA'], [51, 'sourceB'], [100, 'sourceB']]) {
-    const data = await (await compare(url, { ...payload, ratioB })).json();
-    assert.equal(data.candidate.routedFrom, expectedSource);
-    assert.equal(data.candidate.provenance, 'routed');
+test('measured preference selects a winner independently of obsolete ratio values', async t => {
+  let tick=0; const times=[0,20,100,110];
+  const {url}=await setup(t,{now:()=>times[tick++%4],responses:{b:{eval_count:24,eval_duration:8e9}}});
+  for(const ratioB of [0,50,100]) {
+    const data=await (await compare(url,{...payload,ratioB})).json();
+    assert.equal(data.candidate.selectedFrom,'sourceB');
+    assert.equal(data.selection.preference,'latency');
   }
+  const throughput=await (await compare(url,{...payload,selectionPreference:'throughput'})).json();
+  assert.equal(throughput.candidate.selectedFrom,'sourceA');
+  assert.match(throughput.selection.reason,/6 tok\/s/);
+  assert.equal((await compare(url,{...payload,selectionPreference:'unknown'})).status,400);
 });
+
 test('missing Ollama token and duration metadata remains unavailable', async t => {
   const { url } = await setup(t, {
     responses: { a: { eval_count: null, eval_duration: null, prompt_eval_count: null, prompt_eval_duration: null, load_duration: null, total_duration: null } },
@@ -196,8 +203,8 @@ test('Gemma-style response without eval_duration keeps counts and total time but
   assert.equal(data.sourceA.tokPerSec, null);
   assert.equal(data.sourceA.ollamaTotalMs, 1821.99);
   assert.equal(data.sourceB.provenance, 'reused');
-  assert.equal(data.candidate.provenance, 'routed');
-  assert.equal(data.candidate.routedFrom, 'sourceB');
+  assert.equal(data.candidate.provenance, 'recommended');
+  assert.equal(data.candidate.selectedFrom, 'sourceA');
   assert.equal(data.candidate.measurementSource, 'sourceA');
   assert.equal(data.candidate.generationMs, null);
   assert.equal(data.candidate.ollamaTotalMs, 1821.99);
@@ -457,6 +464,10 @@ test('BlendPilot recommendation API is reproducible from persisted completed res
   assert.equal(latency.recommendedModelId, 'gemma4:cloud');
   assert.equal(latency.recommendedModel.medianWallLatencyMs, 100);
   assert.equal(missingCategory.status, 'insufficient_evidence');
+  const gated = await (await requestBlendPilotRecommendation(url, { ...request, preference: 'latency', minimumPassRatePercent: 80 })).json();
+  assert.equal(gated.recommendedModelId, 'qwen2.5:3b');
+  assert.equal(gated.minimumPassRatePercent, 80);
+  assert.equal(gated.candidates.find(model => model.modelId === 'gemma4:cloud').eligible, false);
   assert.equal(calls.length, 0);
 });
 
@@ -466,5 +477,32 @@ test('BlendPilot API rejects malformed settings, unknown models, and missing run
   assert.equal((await requestBlendPilotRecommendation(url, { ...base, preference: 'speed' })).status, 400);
   assert.equal((await requestBlendPilotRecommendation(url, { ...base, minimumEvaluations: 0 })).status, 400);
   assert.equal((await requestBlendPilotRecommendation(url, { ...base, category: 'unknown' })).status, 400);
+  for (const minimumPassRatePercent of [-1, 101, '80', null]) assert.equal((await requestBlendPilotRecommendation(url, { ...base, minimumPassRatePercent })).status, 400);
   assert.equal((await requestBlendPilotRecommendation(url, base)).status, 404);
+});
+
+
+test('cloud and local IDs generate independently and cloud auth errors are actionable', async t => {
+  const calls=[]; let unauthorized=false;
+  const server=createApp({enableInferenceLogging:false,fetchImpl:async (url,options)=>{
+    if(String(url).endsWith('/api/tags'))return Response.json({models:[{name:'qwen2.5-coder:latest'},{name:'gemma4:cloud',remote_host:'https://ollama.com'}]});
+    const body=JSON.parse(options.body);calls.push(body.model);
+    if(unauthorized&&body.model==='gemma4:cloud')return Response.json({error:'unauthorized'},{status:401});
+    return Response.json({done:true,model:body.model,message:{content:'Answer from '+body.model},eval_count:4,prompt_eval_count:6});
+  }}).listen(0,'127.0.0.1');
+  await new Promise(resolve=>server.once('listening',resolve));
+  t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}));
+  const url='http://127.0.0.1:'+server.address().port;
+  const body={prompt:'Hello',modelA:'qwen2.5-coder:latest',modelB:'gemma4:cloud',maxTokens:16};
+  const post=()=>fetch(url+'/api/ollama/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await(await post()).json();
+  assert.deepEqual(calls,['qwen2.5-coder:latest','gemma4:cloud']);
+  assert.equal(data.sourceB.provenance,'inference');
+  assert.notEqual(data.sourceA.text,data.sourceB.text);
+  assert.equal(data.sourceB.generationMs,null);
+  unauthorized=true;
+  const failed=await(await post()).json();
+  assert.equal(failed.sourceA.status,'success');
+  assert.equal(failed.sourceB.status,'error');
+  assert.match(failed.sourceB.error,/ollama signin/);
 });

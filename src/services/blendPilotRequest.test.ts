@@ -10,4 +10,5 @@ test('recommendation identity changes when any evidence selection or priority ch
   assert.notEqual(key, blendPilotRequestKey({ ...input, comparisonModelId: 'model-b' }));
   assert.notEqual(key, blendPilotRequestKey({ ...input, preference: 'latency' }));
   assert.notEqual(key, blendPilotRequestKey({ ...input, minimumEvaluations: 3 }));
+  assert.notEqual(key, blendPilotRequestKey({ ...input, minimumPassRatePercent: 80 }));
 });

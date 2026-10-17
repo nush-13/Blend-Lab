@@ -6,6 +6,7 @@ export function blendPilotRequestKey(input: {
   comparisonModelId: string;
   preference: BlendPilotPreference;
   minimumEvaluations: number;
+  minimumPassRatePercent?: number;
 }): string {
-  return JSON.stringify([input.runId, input.category, input.comparisonModelId, input.preference, input.minimumEvaluations]);
+  return JSON.stringify([input.runId, input.category, input.comparisonModelId, input.preference, input.minimumEvaluations, input.minimumPassRatePercent ?? 0]);
 }

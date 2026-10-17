@@ -22,11 +22,11 @@ Settings forwards temperature, top-p, max output tokens, and timeout to inferenc
 
 ## Manual real-model comparison
 
-Run `ollama list` and choose two different installed model IDs. In BlendLab, select one for Model A and the other for Model B, switch to **All 3 Side-by-Side**, enter a prompt, and run it. The source panels should show their selected IDs and separate input/output token counts, wall-clock latency, Ollama total duration, and Ollama generation duration. Throughput is N/A when Ollama omits generation duration metadata. At 0-50% the candidate routes entirely to A; above 50% it routes entirely to B, so 75% selects B rather than blending 75% from it. The candidate identifies its source and reuses that inference; no model weights are merged. Choosing the same ID for A and B performs one inference and marks the B panel as reused. In development, inspect the server terminal for `[BlendLab inference]` JSON records containing per-request IDs, submitted model IDs, HTTP status, and raw Ollama metrics.
+Run `ollama list` and choose two different installed model IDs. In BlendLab, select one for Model A and the other for Model B, switch to **All 3 Side-by-Side**, enter a prompt, and run it. The source panels should show their selected IDs and separate input/output token counts, wall-clock latency, Ollama total duration, and Ollama generation duration. Throughput is N/A when Ollama omits generation duration metadata. Choose lowest response time or highest generation speed. The recommendation reuses the successful response that wins on that measurement and identifies its source; correctness is not graded and no model weights are merged. Choosing the same ID for A and B performs one inference and marks the B panel as reused. In development, inspect the server terminal for `[BlendLab inference]` JSON records containing per-request IDs, submitted model IDs, HTTP status, and raw Ollama metrics.
 
 ## What is real
 
-Model A and B receive the same prompt sequentially to limit memory pressure. Selecting the same model generates once. Ollama does not merge weights: the candidate reuses A at ratios 0–50%, and B above 50%. Merge algorithm controls are hidden in Ollama mode. Token counts and throughput use Ollama eval_count/eval_duration; latency measures elapsed request time.
+Model A and B receive the same prompt sequentially to limit memory pressure. Selecting the same model generates once. The recommendation reuses a successful response based on the chosen measured-performance preference. The ratio slider has been removed; Ollama does not merge weights. Token counts and throughput use Ollama eval_count/eval_duration; latency measures elapsed request time.
 
 Capability Curve aggregates only completed persisted benchmark runs. Pass rates use valid evaluated cases, and latency uses recorded wall-clock durations; these narrow checks do not measure overall intelligence or blend model weights. The Benchmarks and Experiments pages run deterministic checks against discovered Ollama model IDs; run records and named experiment configurations are stored in `.blendlab-data/benchmark-runs.json` and `.blendlab-data/experiments.json`. Experiment history links each configuration to its saved run. Comparisons use only recorded results and identify differing benchmark sets or evaluation settings; missing metrics remain unavailable. Evaluations use exact normalized answers, required code fragments, or an exact JSON object shape, so they are narrow checks rather than subjective quality ratings. Repeating a run creates a new record but does not guarantee identical output from nondeterministic models. Settings are in memory. Alignment guardrails and generation autosave are not implemented. The API binds to loopback and is intended for local use.
 
@@ -39,7 +39,7 @@ npm run build
 npm start
 ```
 
-Production serves the frontend and API at http://127.0.0.1:8000. Tests use isolated HTTP fixtures for discovery, inference, routing, telemetry, input validation, and errors. For a live test using an already installed model:
+Production serves the frontend and API at http://127.0.0.1:8000. Tests use isolated HTTP fixtures for discovery, inference, performance selection, telemetry, input validation, and errors. For a live test using an already installed model:
 
 ```powershell
 $env:OLLAMA_TEST_MODEL = 'qwen2.5-coder:7b'
@@ -75,3 +75,43 @@ The map is served through `/api/graphify/explore` (normally http://localhost:300
 ### Graph node colours
 
 Edit `graphify-colors.json` in the project root. `palette` lists six-digit hex colours in group order; `groupColors` optionally pins a specific community ID, for example `"0": "#45B7D1"`. Reload the map after saving; no index rebuild is needed for colour changes. Nodes and legend are recoloured together, while existing community memberships, names, IDs, and graph relationships remain unchanged. The current code-only, no-cluster index may produce only Community 0, so only its assigned colour appears until Graphify produces additional groups.
+
+## BlendPilot: quality before efficiency
+
+BlendPilot first checks whether a model meets your required benchmark pass rate, then ranks qualifying models. A faster answer or fewer tokens does not automatically mean better quality.
+
+### How to use
+
+1. Complete a benchmark run with at least two models.
+2. Open **BlendPilot** and select the saved run, benchmark category, and comparison model.
+3. Set **Minimum pass rate (%)** (default **80%**) and **Minimum valid evaluations** (default **2**).
+4. Choose **Latency-first** for the fastest qualifying model, or **Correctness-first** for the highest pass rate among qualifying models.
+5. Click **Calculate from saved evidence**. Review the recommendation, pass rates, measured latency, and eligibility explanations in the table.
+
+A model must meet both requirements. The comparison model is included and can remain the recommended choice. A pass rate exactly equal to the threshold qualifies; eligibility uses actual passed/evaluated counts rather than rounded display percentages. Set the pass-rate threshold to **0%** to disable the quality gate.
+
+### Example
+
+| Model | Correct answers | Pass rate | Median latency | Meets an 80% minimum? |
+|---|---|---|---|---|
+| A | 6 of 10 | 60% | 2 seconds | No |
+| B | 9 of 10 | 90% | 5 seconds | Yes |
+
+These are illustrative numbers. Even with Latency-first selected, B is recommended because A fails the quality requirement. If both models qualify, Latency-first selects the faster one.
+
+### When a recommendation is unavailable
+
+- **No model meets your requirement:** adequately measured models fall below the pass-rate threshold. Lower the threshold or evaluate other models; BlendPilot does not invent a winner.
+- **Insufficient evidence:** too few valid evaluated cases or missing required measurements prevent a supported comparison. Run more relevant checks or select another completed run/category.
+
+The pass rate applies only to the selected benchmark run and category, not overall intelligence or accuracy on arbitrary tasks. Current evaluators use exact normalized answers, required code fragments, and exact JSON objects. Recommendations reuse saved results without new model inference or downloads; changing the threshold clears the previous recommendation.
+
+If the app was running before this feature was added, stop and restart it with `npm run dev` so the backend loads the new recommendation policy.
+
+## Gemma 4 cloud comparison
+
+Register the cloud reference with `ollama pull gemma4:cloud`, then run `ollama signin` and finish browser sign-in. This does not download the model weights; inference runs on Ollama Cloud and requires internet/account access. Click Refresh models in BlendLab. Default selection pairs a local model with a different available cloud model, while preserving existing distinct selections. Model A and B execute independently when their IDs differ; identical IDs intentionally reuse one inference. Cloud models are labelled, and prompts plus enabled Graphify source excerpts are sent to the cloud provider. Use only local models for prompts or source code that must remain on your machine.
+
+## Playground performance recommendation
+
+The ratio slider has been removed. Choose Lowest response time or Highest generation speed. Both selected models receive the prompt, and the recommendation selects a successful response using that run’s measured wall latency or tok/s. Its reason and source model are shown. Failed responses are excluded; unavailable metrics produce no measured winner. Same-model slots are labeled as one reused response. This is a performance recommendation, not a correctness or semantic quality assessment. Sequential execution, model loading, and output length affect measurements. BlendPilot’s saved-benchmark recommendations remain separate.
